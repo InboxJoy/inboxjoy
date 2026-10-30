@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400..800&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&display=block">
+<style>
+  :root {
+    --ij-ink: #16141f;
+    --ij-body: #5f5b73;
+    --ij-muted: #9a93b8;
+    --ij-violet: #7c6cf0;
+    --ij-violet-solid: #6d5ae6;
+    --ij-sky: #4ea8f5;
+    --ij-line: rgba(22, 20, 31, 0.07);
+    --ij-glass: rgba(255, 255, 255, 0.82);
+    --ij-page: #f6f5fb;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    background: var(--ij-page);
+    color: var(--ij-ink);
+    font-family: "Google Sans Flex", "Instrument Sans", system-ui, sans-serif;
+    position: relative;
+  }
+  .glow { position: absolute; border-radius: 50%; filter: blur(90px); }
+  .glow.violet { width: 620px; height: 620px; left: -160px; top: -260px; background: rgba(124, 108, 240, 0.30); }
+  .glow.sky { width: 620px; height: 620px; right: -140px; bottom: -300px; background: rgba(78, 168, 245, 0.30); }
+  .frame { position: relative; display: grid; grid-template-columns: 1fr 520px; gap: 48px; padding: 64px 72px; height: 100%; align-items: center; }
+
+  .logo { display: inline-flex; align-items: center; gap: 12px; }
+  .logo img { width: 44px; height: 44px; border-radius: 11px; }
+  .logo span { font-family: "Instrument Sans", sans-serif; font-weight: 700; font-size: 28px; letter-spacing: -0.01em; }
+  .eyebrow { margin-top: 30px; font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ij-violet-solid); }
+  h1 { margin-top: 14px; font-size: 54px; line-height: 1.04; font-weight: 800; letter-spacing: -0.035em; }
+  h1 em { font-style: normal; background: linear-gradient(90deg, var(--ij-violet), var(--ij-sky)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { margin-top: 18px; font-size: 19px; line-height: 1.5; color: var(--ij-body); max-width: 560px; }
+  .pills { margin-top: 26px; display: flex; flex-wrap: nowrap; gap: 8px; }
+  .pill { white-space: nowrap; font-size: 13.5px; font-weight: 600; padding: 8px 13px; border-radius: 999px; background: var(--ij-glass); border: 1px solid var(--ij-line); color: var(--ij-ink); }
+
+  .stack { position: relative; height: 470px; }
+  .term { position: absolute; top: 0; left: 0; right: 0; background: var(--ij-ink); border-radius: 20px; padding: 18px 22px 22px; color: #e9e7f5; font-family: "IBM Plex Mono", monospace; font-size: 13.5px; line-height: 1.75; }
+  .term .bar { display: flex; gap: 7px; margin-bottom: 14px; }
+  .term .bar i { width: 11px; height: 11px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); }
+  .term .cmd { color: #fff; margin-bottom: 6px; }
+  .term .cmd b { color: var(--ij-sky); font-weight: 500; }
+  .term .ok { color: #b8b2d9; }
+  .term .ok s { text-decoration: none; color: #7ee2b8; }
+  .term .go { color: #fff; }
+  .term .go s { text-decoration: none; color: var(--ij-violet); }
+
+  .card { position: absolute; left: 36px; right: -12px; bottom: 0; background: #fff; border: 1px solid var(--ij-line); border-radius: 20px; padding: 20px 22px; font-family: "Instrument Sans", sans-serif; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; }
+  .card-title { font-size: 16px; font-weight: 700; }
+  .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: #1f8a5b; background: rgba(31, 138, 91, 0.09); padding: 4px 10px; border-radius: 999px; }
+  .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #1f8a5b; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+  .stat { border: 1px solid var(--ij-line); border-radius: 14px; padding: 10px 12px; }
+  .stat small { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ij-muted); }
+  .stat strong { display: block; margin-top: 3px; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .steps { margin-top: 12px; display: flex; gap: 8px; }
+  .step { flex: 1; font-size: 12.5px; color: var(--ij-body); padding: 8px 10px; border-radius: 10px; background: rgba(124, 108, 240, 0.07); }
+  .step b { display: block; color: var(--ij-ink); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="glow violet"></div>
+  <div class="glow sky"></div>
+  <div class="frame">
+    <div>
+      <div class="logo"><img src="../../apps/web/public/brand/icon-128x128.png" alt=""><span>InboxJoy</span></div>
+      <div class="eyebrow">Open source · Self-hosted</div>
+      <h1>Cold email sequences,<br><em>on your own server.</em></h1>
+      <p class="lede">Send multi-step campaigns from Gmail and Outlook. Follow-ups stop when someone replies, and every answer lands in one inbox.</p>
+      <div class="pills">
+        <span class="pill">Gmail &amp; Outlook</span>
+        <span class="pill">Stops on reply</span>
+        <span class="pill">Unified inbox</span>
+        <span class="pill">One-command install</span>
+      </div>
+    </div>
+    <div class="stack">
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i></div>
+        <div class="cmd">$ curl -fsSL <b>https://raw.githubusercontent.com/\</b><br>&nbsp;&nbsp;&nbsp;&nbsp;<b>inboxjoy/inboxjoy/main/deploy/install.sh</b> | sudo sh</div>
+        <div class="ok"><s>✓</s> Docker ready</div>
+        <div class="ok"><s>✓</s> Database, worker and nightly backups</div>
+        <div class="ok"><s>✓</s> HTTPS for inbox.acme.example</div>
+        <div class="go"><s>→</s> Open https://inbox.acme.example/app/setup</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Q4 agency outreach</span><span class="status">Running</span></div>
+        <div class="stats">
+          <div class="stat"><small>Sent</small><strong>1,284</strong></div>
+          <div class="stat"><small>Replies</small><strong>96</strong></div>
+          <div class="stat"><small>Reply rate</small><strong>7.5%</strong></div>
+        </div>
+        <div class="steps">
+          <div class="step"><b>Day 0</b>Intro</div>
+          <div class="step"><b>Day 3</b>Follow-up</div>
+          <div class="step"><b>Day 7</b>Last nudge</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
