@@ -97,7 +97,8 @@ export const authSessions = pgTable("auth_sessions", {
 
 export const authAccounts = pgTable("auth_accounts", {
   id: uuid("id").primaryKey(),
-  issuer: varchar("issuer", { length: 320 }).notNull(),
+  // Written only by Better Auth 1.7.0-1.7.2; optional since 0044.
+  issuer: varchar("issuer", { length: 320 }),
   accountId: text("account_id").notNull(),
   providerId: varchar("provider_id", { length: 120 }).notNull(),
   userId: uuid("user_id").notNull().references(() => authUsers.id, { onDelete: "cascade" }),
@@ -110,7 +111,7 @@ export const authAccounts = pgTable("auth_accounts", {
   password: text("password"),
   ...timestamps,
 }, (table) => ({
-  issuerAccountIdx: uniqueIndex("auth_accounts_issuer_account_idx").on(table.issuer, table.accountId),
+  providerAccountIdx: index("auth_accounts_provider_account_idx").on(table.providerId, table.accountId),
   userIdx: index("auth_accounts_user_idx").on(table.userId),
 }));
 

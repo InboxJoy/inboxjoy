@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const captureException = vi.fn();
 const shutdown = vi.fn().mockResolvedValue(undefined);
-const PostHogMock = vi.fn().mockImplementation(() => ({ captureException, shutdown }));
+// A plain function, not an arrow: the helper calls it with `new`.
+const PostHogMock = vi.fn().mockImplementation(function () { return { captureException, shutdown }; });
 
 vi.mock("posthog-node", () => ({ PostHog: PostHogMock }));
 
