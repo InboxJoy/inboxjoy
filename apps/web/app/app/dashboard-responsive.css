@@ -1,0 +1,563 @@
+/* dashboard-responsive.css
+ *
+ * Phone (<=640px) and tablet (641-900px) fixes for the signed-in dashboard.
+ * Loads after dashboard.css and dashboard-polish.css, so same-specificity
+ * selectors here win by source order. Tokens only, no new colors, flat
+ * surfaces (hairline var(--ij-line) borders). Mirrors the existing
+ * .campaign-contact-row "stacked card + data-label" pattern from
+ * dashboard-polish.css -- see DESIGN.md "Tables".
+ */
+
+/* ------------------------------------------------------------------ */
+/* Sequence detail: step performance table (P0)                       */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .sequence-step-row {
+    grid-template-columns: 40px minmax(150px, 1.7fr) repeat(4, minmax(54px, 0.6fr)) minmax(120px, 1fr);
+    gap: 10px;
+    min-width: 0;
+    padding-inline: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .sequence-step-row.polish-table-head {
+    display: none;
+  }
+
+  .sequence-step-row {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 8px 10px;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .sequence-step-row > *:nth-child(n + 3) {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .sequence-step-row > [data-label]::before {
+    color: var(--ij-muted);
+    content: attr(data-label);
+    flex: none;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Settings tables: health / team / keys / oauth (P0)                  */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .settings-table-row {
+    gap: 10px;
+    min-width: 0;
+    padding-inline: 16px;
+  }
+
+  .settings-table-row--health {
+    grid-template-columns: minmax(150px, 1.3fr) minmax(70px, 0.6fr) repeat(2, minmax(48px, 0.4fr)) minmax(100px, 0.9fr) minmax(60px, 0.4fr);
+  }
+
+  .settings-table-row--team {
+    grid-template-columns: minmax(150px, 1.3fr) minmax(90px, 0.5fr) minmax(90px, 0.7fr) auto;
+  }
+
+  .settings-table-row--keys {
+    grid-template-columns: minmax(150px, 1.3fr) minmax(120px, 0.8fr) minmax(60px, 0.4fr) auto;
+  }
+
+  .settings-table-row--oauth {
+    grid-template-columns: minmax(150px, 1.3fr) minmax(130px, 0.8fr) minmax(60px, 0.4fr) auto;
+  }
+
+  .settings-table-row--affiliate {
+    grid-template-columns: minmax(120px, 1fr) minmax(90px, 0.6fr) minmax(80px, 0.6fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-table-row.settings-table-head {
+    display: none;
+  }
+
+  .settings-team-role-select {
+    min-height: 40px;
+  }
+
+  .settings-table-row {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .settings-table-row > *:nth-child(n + 2) {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .settings-table-row > [data-label]::before {
+    color: var(--ij-muted);
+    content: attr(data-label);
+    flex: none;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .settings-table-row > .ij-button {
+    min-height: 40px;
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Leads table (P0)                                                    */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .leads-table .table-row {
+    gap: 10px;
+    grid-template-columns: 28px minmax(160px, 1.4fr) minmax(100px, 0.9fr) minmax(80px, 0.7fr) 90px 90px;
+    min-width: 0;
+    padding-inline: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .leads-table .table-row.table-head {
+    display: none;
+  }
+
+  .leads-table .table-row {
+    align-items: start;
+    display: grid;
+    gap: 8px 10px;
+    grid-template-columns: 40px 1fr;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .leads-table .table-row > span:first-child {
+    align-items: center;
+    display: flex;
+    height: 40px;
+    justify-content: center;
+    width: 40px;
+  }
+
+  .leads-table .table-row input[type="checkbox"] {
+    height: 18px;
+    width: 18px;
+  }
+
+  .leads-table .table-row > .leads-identity {
+    grid-column: 2;
+  }
+
+  .leads-table .table-row > *:nth-child(n + 3) {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .leads-table .table-row > [data-label]::before {
+    color: var(--ij-muted);
+    content: attr(data-label);
+    flex: none;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Campaigns list table (P1)                                          */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .campaign-page .campaign-table-row {
+    gap: 12px;
+    grid-template-columns: minmax(180px, 1.8fr) minmax(140px, 1.3fr) minmax(72px, 0.5fr) minmax(72px, 0.5fr) minmax(84px, 0.6fr) minmax(110px, 0.9fr) minmax(136px, 0.9fr);
+    min-width: 870px;
+    padding: 12px 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .campaign-page .campaign-table-row.campaign-table-head {
+    display: none;
+  }
+
+  /* Each campaign becomes a labelled card: name, status, progress, the three rates, then actions. */
+  .campaign-page .campaign-table-row {
+    display: grid;
+    align-items: start;
+    gap: 10px 8px;
+    grid-template-columns: repeat(3, 1fr);
+    min-width: 0;
+    padding: 16px;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-cell-name {
+    grid-column: 1 / -1;
+    order: -4;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-cell-status {
+    grid-column: 1 / -1;
+    order: -3;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-progress {
+    grid-column: 1 / -1;
+    order: -2;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-cell-rate {
+    order: -1;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-actions {
+    grid-column: 1 / -1;
+    order: 0;
+  }
+
+  .campaign-page .campaign-table-row > span[data-label] {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    text-align: left;
+  }
+
+  .campaign-page .campaign-table-row > span.campaign-cell-status[data-label] {
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-cell-status small {
+    margin-top: 0;
+  }
+
+  .campaign-page .campaign-table-row > span.campaign-progress[data-label] {
+    align-items: stretch;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-progress .enrollment-meter {
+    max-width: none;
+  }
+
+  .campaign-page .campaign-table-row > .campaign-cell-rate::before {
+    color: var(--ij-muted);
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .campaign-page .campaign-actions {
+    border-top: 1px solid var(--ij-line);
+    justify-content: flex-start;
+    padding-top: 10px;
+    width: 100%;
+  }
+
+  .campaign-page .campaign-actions .inbox-tool-buttons {
+    justify-content: flex-start;
+  }
+
+  .campaign-page .campaign-actions .ij-button,
+  .campaign-page .campaign-actions > button {
+    min-height: 40px;
+    padding-inline: 12px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Home dashboard: campaign performance table (P1)                    */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .dashboard-campaign-row {
+    gap: 10px;
+    grid-template-columns: minmax(170px, 2fr) minmax(50px, 0.6fr) minmax(50px, 0.6fr) minmax(70px, 0.7fr) minmax(80px, 0.9fr);
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-campaign-row.polish-table-head {
+    display: none;
+  }
+
+  .dashboard-campaign-row {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: 1fr;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .dashboard-campaign-row > *:nth-child(n + 2) {
+    align-items: baseline;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+  }
+
+  .dashboard-campaign-row > [data-label]::before {
+    color: var(--ij-muted);
+    content: attr(data-label);
+    flex: none;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Mailboxes: sending accounts table (P1)                             */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .inbox-account-grid.polish-table-head {
+    display: none;
+  }
+
+  .inbox-account {
+    min-width: 0;
+  }
+
+  .inbox-account-table {
+    overflow-x: visible;
+  }
+
+  .inbox-account-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1fr;
+    min-width: 0;
+    padding: 14px 16px;
+  }
+
+  .inbox-account-grid > *:nth-child(n + 2):not(.inbox-actions) {
+    display: block;
+  }
+
+  .inbox-account-grid > [data-label]::before {
+    color: var(--ij-muted);
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+  }
+
+  .inbox-account-grid .inbox-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .inbox-tool-buttons {
+    flex-wrap: wrap;
+  }
+
+  .inbox-tool-btn {
+    height: 40px;
+    width: 40px;
+  }
+
+  .inbox-tool-btn svg {
+    height: 19px;
+    width: 19px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Campaign wizard: choice grids a little cramped at tablet (P2)      */
+/* ------------------------------------------------------------------ */
+
+@media (min-width: 641px) and (max-width: 900px) {
+  .campaign-entry-modes,
+  .campaign-template-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Phone polish from rendered review                                  */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  /* Four KPI cards read as one glanceable block, two per row. */
+  .polish-kpi-grid {
+    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .polish-kpi-card {
+    padding: 14px;
+  }
+
+  .polish-kpi-card strong {
+    font-size: 26px;
+  }
+
+  /* Company gets its own labelled block with the job title beneath it. */
+  .leads-table .table-row > [data-label="Company"] {
+    display: block;
+  }
+
+  .leads-table .table-row > [data-label="Company"]::before {
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  .leads-table .table-row > [data-label="Company"] small {
+    color: var(--ij-muted);
+    display: block;
+    font-size: 12px;
+    margin-top: 2px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Campaign detail summary: two per row, like the dashboard KPIs. */
+  .campaign-overview-summary {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* An odd last stat card spans the row instead of leaving a hole. */
+  .polish-kpi-grid > :last-child:nth-child(odd),
+  .campaign-overview-summary > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  /* Settings tab strip scrolls on its own, without a visible scrollbar. */
+  .settings-subnav {
+    scrollbar-width: none;
+  }
+
+  .settings-subnav::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Lead variables (phone): the value table scrolls inside its own container;
+   the page itself never scrolls sideways. */
+@media (max-width: 640px) {
+  .lead-var-toolbar {
+    padding: 16px 16px 0;
+  }
+
+  .lead-var-search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .lead-var-toolbar select {
+    flex: 1 1 100%;
+  }
+
+  .lead-var-notice {
+    margin-inline: 16px;
+  }
+
+  .lead-var-table {
+    min-width: 520px;
+  }
+
+  .lead-var-table th:first-child,
+  .lead-var-table td:first-child {
+    padding-left: 16px;
+  }
+
+  .lead-var-lead {
+    max-width: 150px;
+    min-width: 120px;
+  }
+
+  .lead-var-state,
+  .lead-var-pagination {
+    padding-inline: 16px;
+  }
+
+  .lead-var-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .lead-var-row__count {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .lead-var-meter {
+    grid-row: 3;
+  }
+
+  .lead-var-picker__select {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .lead-var-picker__select select,
+  .lead-var-new input {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+
+  .lead-var-new .ij-button {
+    min-height: 44px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Stat cards on phones: two per row, height follows content          */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .analytics-stat-grid,
+  .affiliate-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ij-stat-card {
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .ij-stat-card p {
+    line-height: 1.35;
+  }
+
+  .ij-stat-card strong {
+    font-size: 24px;
+  }
+
+  /* An odd last card spans the row instead of leaving a hole. */
+  .analytics-stat-grid > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}

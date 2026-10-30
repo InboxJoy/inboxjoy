@@ -1,0 +1,65 @@
+name: Bug report
+description: Something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. For a security problem, do not file an issue:
+        use [private reporting](https://github.com/inboxjoy/inboxjoy/security/advisories/new).
+        For questions, use [Discussions](https://github.com/inboxjoy/inboxjoy/discussions).
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      options:
+        - Self-hosted
+        - Managed service (inboxjoy.online)
+        - Local development
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release tag, image tag or commit SHA.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: Relevant API or worker log lines, or a screenshot. Redact addresses, tokens and any customer data.
+      render: shell
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Docker or bare metal, operating system, Node version, browser, mailbox provider (Gmail, Outlook, SMTP/IMAP).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I removed passwords, API keys and other secrets from everything I pasted.
+          required: true

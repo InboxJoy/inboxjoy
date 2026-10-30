@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: inboxjoy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: inboxjoy
+      POSTGRES_USER: inboxjoy
+      POSTGRES_PASSWORD: inboxjoy_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - inboxjoy_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inboxjoy -d inboxjoy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  inboxjoy_postgres:

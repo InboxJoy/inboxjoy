@@ -1,0 +1,33 @@
+{
+  "name": "@inboxjoy/worker",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=../../.env dist/worker.js",
+    "dev": "tsx --env-file=../../.env src/worker.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@inboxjoy/composio": "workspace:*",
+    "@inboxjoy/core": "workspace:*",
+    "@inboxjoy/db": "workspace:*",
+    "@inboxjoy/email": "workspace:*",
+    "@inboxjoy/queue": "workspace:*",
+    "@inboxjoy/smtp": "workspace:*",
+    "pg": "^8.13.0",
+    "pg-boss": "^10.3.2",
+    "posthog-node": "^5.52.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "@types/node": "^20.14.12",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1"
+  }
+}

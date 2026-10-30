@@ -1,0 +1,402 @@
+#!/bin/sh
+# inboxjoy: day-two commands for a self-hosted InboxJoy.
+#
+#   inboxjoy status               show what is running and how healthy it is
+#   inboxjoy logs [service]       follow the logs (api, worker, web, caddy, postgres)
+#   inboxjoy backup               save a database backup now
+#   inboxjoy restore <file>       replace the database with a backup
+#   inboxjoy upgrade [version]    back up, pull the new images, migrate, restart
+#   inboxjoy restart [service]    apply changes made in .env
+#   inboxjoy version              show the configured and running versions
+#
+# Installed by deploy/install.sh at /usr/local/bin/inboxjoy. Works on any
+# POSIX shell. Settings (all optional):
+#   INBOXJOY_DIR   install folder, default /opt/inboxjoy
+#   INBOXJOY_REPO  GitHub repository to upgrade from, default inboxjoy/inboxjoy
+set -eu
+
+INBOXJOY_DIR="${INBOXJOY_DIR:-/opt/inboxjoy}"
+INBOXJOY_REPO="${INBOXJOY_REPO:-inboxjoy/inboxjoy}"
+RAW_BASE="${INBOXJOY_RAW_BASE:-https://raw.githubusercontent.com/$INBOXJOY_REPO}"
+API_BASE="${INBOXJOY_API_BASE:-https://api.github.com/repos/$INBOXJOY_REPO}"
+INBOXJOY_BIN="${INBOXJOY_BIN:-/usr/local/bin/inboxjoy}"
+KEEP_BACKUPS="${BACKUP_KEEP:-14}"
+APP_SERVICES="web api worker caddy"
+
+if [ -t 1 ]; then
+  BOLD="$(printf '\033[1m')"; RED="$(printf '\033[31m')"; YELLOW="$(printf '\033[33m')"; RESET="$(printf '\033[0m')"
+else
+  BOLD=""; RED=""; YELLOW=""; RESET=""
+fi
+
+say() { printf '%s\n' "$*"; }
+warn() { printf '%s%s%s\n' "$YELLOW" "$*" "$RESET" >&2; }
+die() { printf '%serror:%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: inboxjoy <command>
+
+  status               Show what is running and how healthy it is
+  logs [service]       Follow the logs (api, worker, web, caddy, postgres)
+  backup               Save a database backup now
+  restore <file> [-y]  Replace the database with a backup (asks first)
+  upgrade [version]    Back up, pull the new images, migrate, restart
+                       (-n or --no-backup skips the backup)
+  restart [service]    Apply changes made in .env (default: web api worker)
+  version              Show the configured and running versions
+
+Backups live in /opt/inboxjoy/backups. The newest 14 are kept.
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+env_get() { # KEY -> value (quotes removed)
+  [ -f "$INBOXJOY_DIR/.env" ] || return 0
+  sed -n "s/^$1=//p" "$INBOXJOY_DIR/.env" | tail -n 1 | sed "s/^['\"]//; s/['\"]\$//"
+}
+
+# The release docker compose must run: whatever .env says right now (it changes
+# during an upgrade), never the caller's shell. Compose lets a variable in the
+# environment win over .env, and `sudo -E` (used below) carries the caller's
+# environment along, so a stray INBOXJOY_VERSION there would run or pull the
+# wrong release.
+compose_version() {
+  _cv="$(env_get INBOXJOY_VERSION)"
+  printf '%s' "${_cv:-latest}"
+}
+
+# docker compose, from the install folder, on the release in .env. Stdin is
+# closed so a command can never swallow input meant for something else.
+dc() { INBOXJOY_VERSION="$(compose_version)" docker compose "$@" </dev/null; }
+
+env_set() { # KEY VALUE: replace the line, or add it at the end
+  _tmp="$INBOXJOY_DIR/.env.tmp.$$"
+  ( umask 077; KEY="$1" VAL="$2" awk '
+      BEGIN { done = 0; k = ENVIRON["KEY"]; v = ENVIRON["VAL"] }
+      index($0, k "=") == 1 { if (!done) print k "=" v; done = 1; next }
+      { print }
+      END { if (!done) print k "=" v }
+    ' "$INBOXJOY_DIR/.env" > "$_tmp" )
+  chmod 600 "$_tmp"
+  mv -f "$_tmp" "$INBOXJOY_DIR/.env"
+}
+
+human_size() { # file -> 12K / 3.4M
+  _bytes=$(wc -c < "$1" | tr -d ' ')
+  awk -v b="$_bytes" 'BEGIN { if (b >= 1048576) printf "%.1fM", b / 1048576; else printf "%dK", (b + 1023) / 1024 }'
+}
+
+require_install() {
+  [ -f "$INBOXJOY_DIR/.env" ] && [ -f "$INBOXJOY_DIR/compose.yml" ] \
+    || die "No InboxJoy install found in $INBOXJOY_DIR. Run the installer first (see docs/self-hosting/README.md)."
+  command -v docker >/dev/null 2>&1 || die "Docker is not installed."
+  cd "$INBOXJOY_DIR"
+}
+
+# Waits until every container of a service is healthy (or running, when it has
+# no health check). Returns 1 on timeout or when a container stops.
+wait_healthy() { # service [seconds]
+  _svc="$1"; _limit="${2:-180}"; _waited=0
+  while [ "$_waited" -lt "$_limit" ]; do
+    _ids="$(dc ps -q "$_svc" 2>/dev/null || true)"
+    if [ -n "$_ids" ]; then
+      _ok=1
+      for _id in $_ids; do
+        _state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$_id" 2>/dev/null </dev/null || echo unknown)"
+        case "$_state" in
+          healthy|running) ;;
+          unhealthy|exited|dead) return 1 ;;
+          *) _ok=0 ;;
+        esac
+      done
+      [ "$_ok" -eq 1 ] && return 0
+    fi
+    sleep 2
+    _waited=$((_waited + 2))
+  done
+  return 1
+}
+
+wait_for_stack() {
+  for _svc in $APP_SERVICES; do
+    printf 'Waiting for %s... ' "$_svc"
+    if wait_healthy "$_svc" 180; then
+      say "ok"
+    else
+      say "failed"
+      warn "$_svc did not become healthy. Last log lines:"
+      dc logs --tail=40 "$_svc" >&2 || true
+      return 1
+    fi
+  done
+}
+
+ensure_postgres() {
+  dc up -d postgres >/dev/null
+  wait_healthy postgres 120 || die "The database did not become healthy. Check: inboxjoy logs postgres"
+}
+
+latest_release_tag() {
+  curl -fsSL --max-time 20 "$API_BASE/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+fetch() { # url dest
+  curl -fsSL --retry 3 --retry-delay 2 --max-time 120 -o "$2" "$1" || return 1
+  [ -s "$2" ]
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+cmd_version() {
+  require_install
+  _configured="$(env_get INBOXJOY_VERSION)"
+  say "Configured version: ${_configured:-latest}"
+  for _svc in api worker web; do
+    _id="$(dc ps -q "$_svc" 2>/dev/null | head -n 1 || true)"
+    [ -n "$_id" ] || continue
+    _img="$(docker inspect --format '{{.Config.Image}}' "$_id" 2>/dev/null </dev/null || true)"
+    _label="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$_id" 2>/dev/null </dev/null || true)"
+    say "Running $_svc: ${_img:-unknown}${_label:+ (version $_label)}"
+  done
+}
+
+cmd_status() {
+  require_install
+  say "${BOLD}InboxJoy${RESET} $(env_get INBOXJOY_VERSION) at https://$(env_get APP_DOMAIN)"
+  say ""
+  dc ps
+  say ""
+  _code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "https://$(env_get APP_DOMAIN)/api/ready" 2>/dev/null || true)"
+  if [ "$_code" = "200" ]; then
+    say "Website: reachable over HTTPS, API is ready"
+  else
+    say "Website: not reachable yet (got ${_code:-no answer}). Check DNS, ports 80/443, and: inboxjoy logs caddy"
+  fi
+  _newest="$(ls -1 "$INBOXJOY_DIR"/backups/inboxjoy-*.dump 2>/dev/null | sort -r | head -n 1 || true)"
+  _count="$(ls -1 "$INBOXJOY_DIR"/backups/inboxjoy-*.dump 2>/dev/null | wc -l | tr -d ' ')"
+  if [ -n "$_newest" ]; then
+    say "Backups: $_count saved, newest $(basename "$_newest") ($(human_size "$_newest"))"
+  else
+    say "Backups: none yet. Run: inboxjoy backup"
+  fi
+  say "Disk: $(df -Ph "$INBOXJOY_DIR" | awk 'NR == 2 { print $4 " free (" $5 " used)" }')"
+}
+
+cmd_logs() {
+  require_install
+  INBOXJOY_VERSION="$(compose_version)"
+  export INBOXJOY_VERSION
+  exec docker compose logs -f --tail=200 "$@"
+}
+
+cmd_restart() {
+  require_install
+  if [ "$#" -eq 0 ]; then
+    set -- web api worker
+  fi
+  dc up -d --force-recreate "$@"
+  wait_for_stack
+}
+
+prune_backups() { # prefix
+  ls -1 "$INBOXJOY_DIR"/backups/"$1"-*.dump 2>/dev/null | sort -r | tail -n +"$((KEEP_BACKUPS + 1))" \
+    | while IFS= read -r _old; do rm -f -- "$_old"; done
+}
+
+# Writes a custom-format dump to backups/<prefix>-<utc time>.dump and prints
+# the path. The file only appears under its final name when it is complete.
+make_backup() { # prefix
+  _dir="$INBOXJOY_DIR/backups"
+  ( umask 077; mkdir -p "$_dir" ); chmod 700 "$_dir"
+  _file="$_dir/$1-$(date -u +%Y%m%dT%H%M%SZ).dump"
+  if ! ( umask 077; dc exec -T postgres pg_dump -U inboxjoy -d inboxjoy --format=custom > "$_file.partial" ) || [ ! -s "$_file.partial" ]; then
+    rm -f "$_file.partial"
+    return 1
+  fi
+  mv -f "$_file.partial" "$_file"
+  printf '%s\n' "$_file"
+}
+
+cmd_backup() {
+  require_install
+  ensure_postgres
+  _file="$(make_backup inboxjoy)" || die "The backup failed. Check: inboxjoy logs postgres"
+  prune_backups inboxjoy
+  say "Backup saved: $_file ($(human_size "$_file"))"
+  say "Copy it off this server too; see docs/self-hosting/backups.md."
+}
+
+cmd_restore() {
+  _file=""; _yes=0; _safety=1
+  for _arg in "$@"; do
+    case "$_arg" in
+      -y|--yes) _yes=1 ;;
+      --no-safety-backup) _safety=0 ;;
+      -*) die "Unknown option $_arg" ;;
+      *) [ -z "$_file" ] || die "Give one backup file."; _file="$_arg" ;;
+    esac
+  done
+  [ -n "$_file" ] || die "Usage: inboxjoy restore <backup file>   (see: ls $INBOXJOY_DIR/backups)"
+  [ -f "$_file" ] || die "Backup file not found: $_file"
+  # Resolve the path before require_install changes directory.
+  _dirname="$(cd "$(dirname "$_file")" && pwd)"
+  _file="$_dirname/$(basename "$_file")"
+  [ "$(head -c 5 "$_file")" = "PGDMP" ] || die "$_file is not an InboxJoy backup (expected a pg_dump custom-format file)."
+  require_install
+
+  if [ "$_yes" -ne 1 ]; then
+    [ -t 0 ] || die "Not a terminal. Add --yes to confirm the restore."
+    warn "This replaces ALL current InboxJoy data (accounts, leads, campaigns, mailboxes) with the contents of:"
+    warn "  $_file"
+    [ "$_safety" -eq 1 ] && warn "A safety copy of the current data is saved first."
+    printf 'Type "restore" to continue: '
+    read -r _answer || _answer=""
+    [ "$_answer" = "restore" ] || die "Cancelled. Nothing was changed."
+  fi
+
+  ensure_postgres
+  _safety_file=""
+  if [ "$_safety" -eq 1 ]; then
+    _safety_file="$(make_backup pre-restore)" || die "Could not save a safety copy of the current data. Nothing was changed. Use --no-safety-backup to restore anyway."
+    prune_backups pre-restore
+    say "Safety copy of the current data: $_safety_file"
+  fi
+
+  say "Stopping the app..."
+  dc stop web api worker >/dev/null
+  say "Restoring..."
+  dc exec -T postgres psql -U inboxjoy -d postgres -v ON_ERROR_STOP=1 \
+    -c "DROP DATABASE IF EXISTS inboxjoy WITH (FORCE)" \
+    -c "CREATE DATABASE inboxjoy TEMPLATE template0" >/dev/null
+  # Not through dc: the backup must reach pg_restore on stdin.
+  if ! INBOXJOY_VERSION="$(compose_version)" docker compose exec -T postgres pg_restore -U inboxjoy -d inboxjoy --no-owner < "$_file"; then
+    warn "pg_restore reported problems (some are harmless). Checking the result..."
+  fi
+  _migrations="$(dc exec -T postgres psql -U inboxjoy -d inboxjoy -tAc "select count(*) from inboxjoy_schema_migrations" 2>/dev/null | tr -d ' \r' || true)"
+  case "$_migrations" in
+    ''|0|*[!0-9]*)
+      die "The restore did not produce a usable database.${_safety_file:+ Your previous data is in $_safety_file.}"
+      ;;
+  esac
+
+  say "Updating the database to this version..."
+  dc run --rm -T migrate || die "Migration failed after the restore. See the output above."
+  dc up -d --remove-orphans >/dev/null
+  wait_for_stack || die "The app did not come back healthy after the restore."
+  say "Restore complete."
+  say "If this backup came from a newer version of InboxJoy, run: inboxjoy upgrade"
+}
+
+cmd_upgrade() {
+  _target=""; _backup=1
+  for _arg in "$@"; do
+    case "$_arg" in
+      -n|--no-backup) _backup=0 ;;
+      -*) die "Unknown option $_arg" ;;
+      *) [ -z "$_target" ] || die "Give one version."; _target="$_arg" ;;
+    esac
+  done
+  require_install
+
+  case "$_target" in
+    ''|latest)
+      _tag="$(latest_release_tag)"
+      [ -n "$_tag" ] || die "Could not find the latest release on GitHub (offline or rate limited). Try again, or name a version: inboxjoy upgrade 1.2.3"
+      ;;
+    v*) _tag="$_target" ;;
+    *) _tag="v$_target" ;;
+  esac
+  _version="${_tag#v}"
+  _previous="$(env_get INBOXJOY_VERSION)"
+  say "Upgrading InboxJoy: ${_previous:-unknown} -> $_version"
+
+  _work="$(mktemp -d)"
+  trap 'rm -rf "$_work"' EXIT
+  for _name in compose.yml Caddyfile bin/inboxjoy; do
+    mkdir -p "$_work/$(dirname "$_name")"
+    fetch "$RAW_BASE/$_tag/deploy/$_name" "$_work/$_name" \
+      || die "Could not download deploy/$_name for $_tag. Is $_version a real release? Nothing was changed."
+  done
+  grep -q '^services:' "$_work/compose.yml" || die "The downloaded compose.yml looks wrong. Nothing was changed."
+  sh -n "$_work/bin/inboxjoy" || die "The downloaded inboxjoy command looks wrong. Nothing was changed."
+
+  if [ "$_backup" -eq 1 ]; then
+    ensure_postgres
+    _saved="$(make_backup inboxjoy)" || die "The pre-upgrade backup failed, so nothing was changed. Fix that, or use --no-backup."
+    prune_backups inboxjoy
+    say "Backup saved: $_saved"
+  fi
+
+  cp -f compose.yml compose.yml.previous
+  cp -f Caddyfile Caddyfile.previous 2>/dev/null || true
+  cp "$_work/compose.yml" compose.yml
+  cp "$_work/Caddyfile" Caddyfile
+  env_set INBOXJOY_VERSION "$_version"
+
+  undo_config() {
+    mv -f compose.yml.previous compose.yml
+    [ ! -f Caddyfile.previous ] || mv -f Caddyfile.previous Caddyfile
+    [ -z "$_previous" ] || env_set INBOXJOY_VERSION "$_previous"
+  }
+
+  if ! dc config -q; then
+    undo_config
+    die "The new configuration is not valid for this server. Nothing was restarted and your settings are back as they were."
+  fi
+  say "Downloading the new images..."
+  if ! dc pull; then
+    undo_config
+    die "Could not download the $_version images. Nothing was restarted and your settings are back as they were."
+  fi
+  say "Updating the database..."
+  ensure_postgres
+  if ! dc run --rm -T migrate; then
+    undo_config
+    die "The database update failed, so nothing was restarted: the site is still running $_previous. Your backup is in $INBOXJOY_DIR/backups. Check the output above."
+  fi
+  say "Restarting..."
+  dc up -d --remove-orphans >/dev/null
+  if ! wait_for_stack; then
+    warn "The new version did not start cleanly."
+    warn "To go back: inboxjoy upgrade ${_previous:-<previous version>}"
+    warn "If the database update caused it, restore the backup too: inboxjoy restore <file in $INBOXJOY_DIR/backups>"
+    exit 1
+  fi
+  rm -f compose.yml.previous Caddyfile.previous
+  docker image prune -f >/dev/null 2>&1 </dev/null || true
+
+  # Replace this command last, with a new file (rename), so the running copy is untouched.
+  if [ -w "$(dirname "$INBOXJOY_BIN")" ] && [ -f "$INBOXJOY_BIN" ]; then
+    cp "$_work/bin/inboxjoy" "$INBOXJOY_BIN.new" && chmod 755 "$INBOXJOY_BIN.new" && mv -f "$INBOXJOY_BIN.new" "$INBOXJOY_BIN" \
+      || warn "Could not update the inboxjoy command itself; the old one still works."
+  fi
+  say "InboxJoy $_version is running. Release notes: https://github.com/$INBOXJOY_REPO/releases/tag/$_tag"
+}
+
+main() {
+  _command="${1:-help}"
+  [ "$#" -eq 0 ] || shift
+  case "$_command" in
+    help|-h|--help) usage; return 0 ;;
+    status|logs|backup|restore|upgrade|restart|version) ;;
+    *) usage >&2; return 1 ;;
+  esac
+  # Docker needs root (or the docker group). Re-run through sudo when needed.
+  if [ -z "${INBOXJOY_REEXEC:-}" ] && command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1 </dev/null; then
+    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+      INBOXJOY_REEXEC=1 exec sudo -E "$0" "$_command" "$@"
+    fi
+    die "Cannot talk to Docker. Run this command with sudo."
+  fi
+  "cmd_$_command" "$@"
+}
+
+main "$@"
+exit $?

@@ -1,0 +1,63 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Answers the Caddy container's own health check. It does not depend on DNS or
+# on a certificate, so Caddy reports healthy before HTTPS is ready.
+http://localhost {
+	respond /healthz 200
+}
+
+# One domain serves the web app and the API. Caddy gets and renews the HTTPS
+# certificate for it automatically and redirects plain http to https.
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# App and API pages are isolated from windows they did not open
+	# (Cross-Origin-Opener-Policy). Pages an MCP client may open in a popup are
+	# left out, because web clients need the window handle: the OAuth routes,
+	# the consent page, and the sign-in pages a signed-out user passes through
+	# on the way there. Headers are applied after the upstream responds
+	# ("defer") so neither Next.js nor the API can override them.
+	@appIsolated {
+		not path /oauth/* /app/mcp/* /app/login /app/login/* /app/signup /app/signup/* /app/forgot-password /app/forgot-password/* /app/reset-password /app/reset-password/*
+	}
+	header @appIsolated {
+		Cross-Origin-Opener-Policy "same-origin"
+		defer
+	}
+
+	# /api/* reaches the API with the /api prefix removed.
+	handle_path /api/* {
+		reverse_proxy api:3001 {
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	handle /unsubscribe/* {
+		reverse_proxy api:3001
+	}
+
+	handle /mcp {
+		reverse_proxy api:3001 {
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	handle /.well-known/oauth-protected-resource {
+		reverse_proxy api:3001 {
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

@@ -1,0 +1,266 @@
+# InboxJoy self-hosted stack.
+#
+# deploy/install.sh puts this file at /opt/inboxjoy/compose.yml, next to the
+# .env it writes (see deploy/env.example). Manage it with the `inboxjoy`
+# command, or run `docker compose ...` from that folder.
+#
+# Sized for a 2 GB server: Postgres, API, worker, web and Caddy together use
+# about 0.8 GB when idle. The memory limits below add up to 1.6 GB, which
+# leaves room for the operating system. Add a swap file on small servers (the
+# installer offers to).
+name: inboxjoy
+
+# json-file with rotation: a few MB per service, never fills the disk.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-service: &service
+  init: true
+  restart: unless-stopped
+  logging: *logging
+
+# Everything the three app services share. The settings people change live in
+# .env (env_file); the values below are fixed by this stack's wiring and win
+# over .env.
+x-app-env: &app-env
+  NODE_ENV: production
+  # Read at run time by api, worker and web (never at build time: one web image
+  # serves every edition). .env sets it; selfhost is the fallback.
+  INBOXJOY_EDITION: ${INBOXJOY_EDITION:-selfhost}
+  # The running release, as set in .env by the installer and `inboxjoy upgrade`
+  # (also the image tag). Workspace exports are stamped with it.
+  INBOXJOY_VERSION: ${INBOXJOY_VERSION:-latest}
+  # The bundled Postgres is on the private compose network, so no TLS.
+  DATABASE_URL: postgresql://inboxjoy:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/inboxjoy?sslmode=disable
+
+services:
+  postgres:
+    <<: *service
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: inboxjoy
+      POSTGRES_USER: inboxjoy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    # Small-server tuning. 60 connections cover the app pools (web 5 + api 8 +
+    # worker 6 + queue 5), migrations and the backup job with room to spare.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=60
+    # Not published to the host: only containers on this stack can reach it.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inboxjoy -d inboxjoy"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  # One-shot: applies pending database migrations, then exits. api, worker and
+  # web wait for it to succeed, so a failed migration never starts new code
+  # against an old schema. Safe to run again at any time.
+  migrate:
+    <<: *service
+    image: ghcr.io/inboxjoy/api:${INBOXJOY_VERSION:-latest}
+    restart: "no"
+    command: ["pnpm", "exec", "tsx", "../../packages/db/src/migrate.ts"]
+    environment:
+      DATABASE_URL: postgresql://inboxjoy:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/inboxjoy?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  api:
+    <<: *service
+    image: ghcr.io/inboxjoy/api:${INBOXJOY_VERSION:-latest}
+    env_file: .env
+    environment:
+      <<: *app-env
+      API_HOST: 0.0.0.0
+      API_PORT: "3001"
+      DATABASE_POOL_MAX: ${API_DATABASE_POOL_MAX:-8}
+      # Keep Node's heap under the container limit so it collects garbage
+      # instead of being killed.
+      NODE_OPTIONS: --max-old-space-size=240
+    # Lets AI_BASE_URL point at a model server on this machine, for example
+    # http://host.docker.internal:11434/v1 for Ollama.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+
+  # One worker is enough for a single server. It sends the emails and reads
+  # replies, so it must keep running; do not scale it up on a 2 GB machine.
+  worker:
+    <<: *service
+    image: ghcr.io/inboxjoy/worker:${INBOXJOY_VERSION:-latest}
+    env_file: .env
+    environment:
+      <<: *app-env
+      WORKER_HEALTH_PORT: "8090"
+      # The app pool must be larger than WORKER_CONCURRENCY (5) so no job waits
+      # for a connection after the mail provider already accepted its message.
+      DATABASE_POOL_MAX: ${WORKER_DATABASE_POOL_MAX:-6}
+      QUEUE_POOL_MAX: ${QUEUE_POOL_MAX:-5}
+      NODE_OPTIONS: --max-old-space-size=240
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+
+  web:
+    <<: *service
+    image: ghcr.io/inboxjoy/web:${INBOXJOY_VERSION:-latest}
+    env_file: .env
+    environment:
+      <<: *app-env
+      DATABASE_POOL_MAX: ${WEB_DATABASE_POOL_MAX:-5}
+      NODE_OPTIONS: --max-old-space-size=336
+    expose:
+      - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 448M
+
+  # HTTPS in front of everything. Gets and renews its certificate by itself
+  # once APP_DOMAIN points at this server and ports 80 and 443 are open.
+  caddy:
+    <<: *service
+    image: caddy:2.8-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+  # Nightly database backup into ./backups (about 03:00 UTC), newest
+  # BACKUP_KEEP files kept. If the server was off at that hour it catches up
+  # after a day without a backup. `inboxjoy backup` takes one on demand.
+  backup:
+    <<: *service
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        umask 077
+        hour="$$(printf '%02d' "$${BACKUP_HOUR_UTC:-3}")"
+        keep="$${BACKUP_KEEP:-14}"
+        while true; do
+          recent_20h="$$(find /backups -maxdepth 1 -name 'inboxjoy-*.dump' -mmin -1200 | head -n 1)"
+          recent_30h="$$(find /backups -maxdepth 1 -name 'inboxjoy-*.dump' -mmin -1800 | head -n 1)"
+          if { [ "$$(date -u +%H)" = "$$hour" ] && [ -z "$$recent_20h" ]; } || [ -z "$$recent_30h" ]; then
+            file="/backups/inboxjoy-$$(date -u +%Y%m%dT%H%M%SZ).dump"
+            if pg_dump --format=custom --file="$$file.partial" && mv "$$file.partial" "$$file"; then
+              echo "backup saved: $$file"
+              ls -1 /backups/inboxjoy-*.dump | sort -r | tail -n +"$$((keep + 1))" | while read -r old; do rm -f "$$old"; done
+            else
+              echo "backup FAILED, will retry" >&2
+              rm -f "$$file.partial"
+            fi
+          fi
+          sleep 600
+        done
+    environment:
+      PGHOST: postgres
+      PGUSER: inboxjoy
+      PGDATABASE: inboxjoy
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-3}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

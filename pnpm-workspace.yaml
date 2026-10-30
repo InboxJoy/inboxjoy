@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  # core-js postinstall only prints a funding banner, so skipping it is correct.
+  core-js: false
+  esbuild: true
+
+# Security floors for transitive copies.
+# pnpm 11 reads overrides from here, not from package.json's "pnpm" field.
+overrides:
+  qs: ">=6.16.0"
+  nodemailer: ">=10.0.6"
+  linkify-it: ">=5.0.2"
+  ip-address: ">=10.3.1"
+  "fast-uri@4": ">=4.1.5"

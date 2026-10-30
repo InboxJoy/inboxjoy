@@ -1,0 +1,65 @@
+name: CI
+
+# Public-repository checks on GitHub-hosted runners (free for public repos).
+# This file ships in the public export; the private ops repo carries it too but
+# the repository guard below keeps it from running there.
+#
+# Safety rules for this workflow:
+# - Triggers are `pull_request` and `push` only. Never switch to
+#   `pull_request_target` or `workflow_run` while checking out PR code: that
+#   would run a stranger's code with a write token and secrets.
+# - The token is read-only and no secrets are used, so fork pull requests get
+#   the same checks as everyone else.
+# - Third-party actions are pinned to full commit SHAs.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: github.repository == 'inboxjoy/inboxjoy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: inboxjoy
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d inboxjoy"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/inboxjoy?sslmode=disable
+      NODE_ENV: test
+      WEB_BASE_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # The pnpm version comes from "packageManager" in the root package.json.
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build

@@ -1,0 +1,172 @@
+name: Release images
+
+# Builds the three InboxJoy images for amd64 and arm64 and publishes them to
+# GHCR (ghcr.io/inboxjoy/api, worker and web) when a release tag is pushed:
+#
+#   git tag v1.2.3 && git push origin v1.2.3
+#
+# Tags published: 1.2.3, 1.2 and latest (prerelease tags such as v1.2.3-rc.1
+# get only their exact version). The self-hosting installer and `inboxjoy
+# upgrade` pull these images. A GitHub Release with generated notes is created
+# at the end; `inboxjoy upgrade` looks it up to find the newest version.
+#
+# Every job is guarded by the repository name: this workflow is for the public
+# repository only and does nothing anywhere else (Actions is disabled on the
+# private repository).
+#
+# Each platform builds on a runner of its own architecture, so Next.js is not
+# built under emulation. The per-platform images are pushed by digest and then
+# joined into one multi-platform tag.
+#
+# Safety rules for this workflow (it pushes images and can write a release):
+# - Every action is pinned to a full commit SHA, with the version in a comment.
+#   Update them deliberately: resolve the new tag to its commit, never use a
+#   tag or branch name.
+# - The token is read-only by default. Each job lists exactly what it needs:
+#   packages: write to push images, contents: write only to create the release.
+# - The trigger is a pushed tag only (nothing that runs a stranger's code with
+#   this token), and no secrets other than the built-in GITHUB_TOKEN are used.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'inboxjoy/inboxjoy'
+    name: Build ${{ matrix.app }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read # checkout
+      packages: write # push the image by digest to GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, worker, web]
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Name the platform
+        run: echo "PLATFORM_PAIR=$(echo '${{ matrix.platform }}' | tr '/' '-')" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Image labels
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/inboxjoy/${{ matrix.app }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false
+          outputs: type=image,name=ghcr.io/inboxjoy/${{ matrix.app }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.app }}-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}-${{ env.PLATFORM_PAIR }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-${{ matrix.app }}-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: github.repository == 'inboxjoy/inboxjoy'
+    name: Publish ${{ matrix.app }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # the metadata action reads repository details for the image labels
+      packages: write # create the multi-platform tags in GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, worker, web]
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.app }}-*
+          merge-multiple: true
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/inboxjoy/${{ matrix.app }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Join the platforms into one tag
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/inboxjoy/${{ matrix.app }}@sha256:%s ' *)
+
+      - name: Check the published image
+        run: docker buildx imagetools inspect ghcr.io/inboxjoy/${{ matrix.app }}:${{ steps.meta.outputs.version }}
+
+  release:
+    if: github.repository == 'inboxjoy/inboxjoy'
+    name: GitHub Release
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=""
+          case "$TAG" in *-*) flags="--prerelease" ;; esac
+          gh release create "$TAG" --repo "$REPO" --verify-tag --generate-notes $flags
