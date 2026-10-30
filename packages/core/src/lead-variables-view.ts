@@ -181,7 +181,9 @@ export async function listLeadVariableNames(db: ViewDb, workspaceId: string, sca
       ) recent
     ) keys
     WHERE name ~ '^[A-Za-z][A-Za-z0-9_]{0,63}$'
-    ORDER BY name
+    -- Case-insensitive A-Z with explicit "C" collation, so the order is the
+    -- same whatever collation the database was created with.
+    ORDER BY lower(name) COLLATE "C", name COLLATE "C"
     LIMIT 2000
   `);
   const rows = (result as unknown as { rows: Array<{ name: string }> }).rows;

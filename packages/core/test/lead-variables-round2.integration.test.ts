@@ -285,7 +285,7 @@ describe.skipIf(!databaseUrl)("lead variables: review fixes and read operations"
       await createContact("foreign", { ws: foreignWorkspaceId, customFields: { secret: "nope" } });
       await db.insert(schema.campaignLeadVariables).values({ sequenceId, contactId: lead.id, workspaceId, values: { icebreaker: "line", hook: "dup" } });
       const result = await runOperation(operation("campaigns.listLeadVariableNames"), context(), {});
-      expect(result).toEqual({ names: ["Topic", "hook", "icebreaker"] });
+      expect(result).toEqual({ names: ["hook", "icebreaker", "Topic"] });
       expect(await runOperation(operation("campaigns.listLeadVariableNames"), context({ workspaceId: foreignWorkspaceId, userId: foreignUserId }), {})).toEqual({ names: ["secret"] });
     });
   });
